@@ -1,2 +1,2 @@
 # wordle-guesser
-A simple scipt to generate and rank guesses to solve a Wordle puzzle
+A simple script to generate and rank guesses to solve a Wordle puzzle
