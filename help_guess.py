@@ -40,11 +40,11 @@ def generate_guesses(elim, green, yellow):
             
     # Update list of green letters in position using yellow letters
     # that only have one open position left
-    for ylet in ylet_to_open.keys():
+    for ylet in list(ylet_to_open.keys()):
         openset = ylet_to_open[ylet]
         if len(openset) == 1:
             only_pos = list(openset)[0]
-            if green(only_pos) is not None:
+            if green[only_pos] is not None:
                 msg = f"No open positions left for letter '{ylet}'"
                 raise RuntimeError(msg)
             green[only_pos] = ylet
@@ -76,12 +76,15 @@ def generate_guesses(elim, green, yellow):
                 char_class = f"[{''.join(sorted(chars))}]"
                 templates[i][pos] = char_class
     for template in templates:
+        print(template)
         pattern = re.compile(''.join(template))
         patterns.append(pattern)
       
     # Generate guesses
     guesses = []
     for word in words:
+        if word == "tiara":
+            print("I FOUND TIARA!")
         for p in patterns:
             if p.match(word):
                 guesses.append(word)
@@ -93,6 +96,15 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--crit", choices = ["freq"], default="freq")
     args = p.parse_args()
+
+    # If the number of zero-frequency guesses <= this threshold, we
+    # will show the zero-frequency guesses along with those that have
+    # non-zero frequency
+    MAX_HAPAX_GUESSES = 20
+    
+    # If the number of guesses with non-zero frequency <= this
+    # threshold, we will also show the zero-frequency guesses
+    MIN_FREQ_GUESSES = 10 
     
     # Get word list
     print("\nGetting word list")
@@ -180,24 +192,24 @@ if __name__ == "__main__":
         if args.crit == "freq":
             # Filter out zero-frequency guesses if there are any
             # guesses with positive frequency
-            pos_freq = [(w, fd[w]) for w in guesses if fd[w] > 0]
+            pos_freq = []
+            hapax = []
+            for w in guesses:
+                if fd[w] > 0:
+                    pos_freq.append((w, fd[w]))
+                else:
+                    hapax.append((w, 0))
             if len(pos_freq):
-                nb_removed = len(guesses) - len(pos_freq)
-                guesses = pos_freq
-                
-                # Rank
-                ranked_guesses = sorted(guesses, key=lambda x:x[1], reverse=True)
+                ranked_guesses = sorted(pos_freq, key=lambda x:x[1], reverse=True)
                 print_guesses(ranked_guesses)
-                if len(pos_freq) and nb_removed:
-                    print(f"... plus {nb_removed} guesses removed because their frequency is 0.")
+                if len(hapax):
+                    if len(hapax) <= MAX_HAPAX_GUESSES or len(pos_freq) <= MIN_FREQ_GUESSES:
+                        line = "-" * (7+len(str(len(pos_freq))))
+                        print(line)
+                        ranked_guesses = sorted(hapax, key=lambda x:x[0], reverse=False)
+                        print_guesses(ranked_guesses)
+                    else:
+                        print(f"... plus {len(hapax)} guesses removed because their frequency is 0.")
             else:
-                ranked_guesses = sorted([(w, "?") for w in guesses])
+                ranked_guesses = sorted(hapax, key=lambda x:x[0], reverse=False)
                 print_guesses(ranked_guesses)
-
-
-
-	
-	
-
-
-
