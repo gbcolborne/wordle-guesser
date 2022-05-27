@@ -76,15 +76,12 @@ def generate_guesses(elim, green, yellow):
                 char_class = f"[{''.join(sorted(chars))}]"
                 templates[i][pos] = char_class
     for template in templates:
-        print(template)
         pattern = re.compile(''.join(template))
         patterns.append(pattern)
       
     # Generate guesses
     guesses = []
     for word in words:
-        if word == "tiara":
-            print("I FOUND TIARA!")
         for p in patterns:
             if p.match(word):
                 guesses.append(word)
@@ -170,6 +167,10 @@ if __name__ == "__main__":
             elif label == 2:
                 if green[position] is None:
                     green[position] = letter
+                    yellow[position] = set()
+                    for position in range(5):
+                        if letter in yellow[position]:
+                            yellow[position].remove(letter)
                 else:
                     assert letter == green[position], "Expected green letters not to change"
 
