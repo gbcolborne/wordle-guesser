@@ -21,7 +21,6 @@ NUM_TO_ORDSTR = {1:'first',
 		 5:'fifth',
 		 6:'sixth'}
 
-
 class GameState:
     def __init__(self):
         self.turn = 0
@@ -37,12 +36,14 @@ class GameState:
         self.turn += 1
         return
 
-def print_guesses(ranked_guesses):
+    
+def print_guesses(ranked_guesses, offset=0):
     for i in range(len(ranked_guesses)):
+        guess_num = i + offset + 1
         x = ranked_guesses[i]
         if len(x) == 2:
             guess, score = x
-            print(f"{i+1}\t{guess}\t{score}")
+            print(f"{guess_num}\t{guess}\t{score}")
         else:
             msg = f"Expected (guess, score), but found this: '{x}'"
             raise RuntimeError(msg)
@@ -68,7 +69,7 @@ def present_guesses(ranked_guesses, crit="freq"):
                     line = "-" * (7+len(str(len(pos_freq))))
                     print(line)
                     zero_freq = sorted(zero_freq, key=lambda x:x[0], reverse=False)
-                    print_guesses(zero_freq)
+                    print_guesses(zero_freq, offset=len(pos_freq))
                 else:
                     print(f"... plus {len(zero_freq)} guesses removed because their frequency is 0.")
             else:
@@ -77,15 +78,9 @@ def present_guesses(ranked_guesses, crit="freq"):
     return
 
 
-def generate_ranked_guesses(game_state, crit="freq", fd=None):
-    """Identify all possible guesses based on game state, rank, and
-    return.
-
-    """
-    assert crit in ["freq"], f"Unknown criterion '{crit}'"
-    if crit == "freq":
-        assert fd is not None, "fd must be provided if criterion is 'freq'"
-
+def generate_guesses(game_state):
+    """Identify all possible guesses based on game state."""
+    
     # List green positions
     green_pos = [i for i in range(5) if game_state.green[i] is not None]
 
@@ -101,8 +96,9 @@ def generate_ranked_guesses(game_state, crit="freq", fd=None):
                     msg = f"No open positions left for letter '{ylet}'"
                     raise RuntimeError(msg)
             
-    # Update list of green letters in position using yellow letters
-    # that only have one open position left
+    # Check if we have found any new green position, i.e. positions
+    # that are the last valid position for a yellow letter
+    green_found = [None for _ in range(5)]
     for ylet in list(ylet_to_open.keys()):
         openset = ylet_to_open[ylet]
         if len(openset) == 1:
@@ -110,12 +106,15 @@ def generate_ranked_guesses(game_state, crit="freq", fd=None):
             if game_state.green[only_pos] is not None:
                 msg = f"No open positions left for letter '{ylet}'"
                 raise RuntimeError(msg)
-            game_state.green[only_pos] = ylet
+            green_found[only_pos] = ylet
             del ylet_to_open[ylet]
-
+            
     # Generate all templates using yellow letters that have more than
     # one open position left
     green_template = ['_' if x is None else x for x in game_state.green]
+    for pos, letter in enumerate(green_found):
+        if letter is not None:
+            green_template[pos] = letter
     if not len(ylet_to_open):
         templates = [green_template]
     else:
@@ -139,6 +138,7 @@ def generate_ranked_guesses(game_state, crit="freq", fd=None):
                 chars = nonelim.difference(game_state.yellow[pos])
                 char_class = f"[{''.join(sorted(chars))}]"
                 templates[i][pos] = char_class
+
     for template in templates:
         pattern = re.compile(''.join(template))
         patterns.append(pattern)
@@ -150,7 +150,19 @@ def generate_ranked_guesses(game_state, crit="freq", fd=None):
             if p.match(word):
                 guesses.append(word)
                 break
+    return guesses, green_found
 
+
+def generate_ranked_guesses(game_state, crit="freq", fd=None):
+    """Identify all possible guesses based on game state, rank, and
+    return.
+
+    """
+    assert crit in ["freq"], f"Unknown criterion '{crit}'"
+    if crit == "freq":
+        assert fd is not None, "fd must be provided if criterion is 'freq'"
+    guesses, greens_found = generate_guesses(game_state)
+    
     # Rank the guesses
     if crit == "freq":
         guesses = [(w,fd[w]) for w in guesses]
@@ -192,13 +204,14 @@ def interact(game_state):
             if game_state.green[position] is None:	
                 game_state.green[position] = letter
                 game_state.yellow[position] = set()
-                for position in range(5):
-                    if letter in game_state.yellow[position]:
-                        game_state.yellow[position].remove(letter)
-                    else:
-                        assert letter == game_state.green[position], "Expected green letters not to change"
-            else:
-                game_state.yellow[position].add(letter)
+                for other_pos in range(5):
+                    if other_pos != position:
+                        if letter in game_state.yellow[other_pos]:
+                            game_state.yellow[other_pos].remove(letter)
+                        else:
+                            assert letter == game_state.green[position], "Expected green letters not to change"
+        else:
+            game_state.yellow[position].add(letter)
     return game_state                               
 
 
