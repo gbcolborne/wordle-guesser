@@ -26,19 +26,66 @@ NUM_TO_ORDSTR = {1:'first',
 
 class GameState:
     def __init__(self):
-        self.turn = 0 # Turn
+        self.turn = 1 # Turn
         self.elim = set() # eliminated letters
         self.green = [None for _ in range(5)] # green letters in position
         self.yellow = [set() for _ in range(5)]	# sets of yellow letters in position
         return
 
+    def copy(self):
+        new = GameState()
+        new.turn = self.turn
+        new.elim = self.elim
+        new.green = self.green
+        new.yellow = self.yellow
+        return new
+
     def increment_turn(self):
         if self.turn == 6:
-            msg = "Maximum number of turns reached"
+            msg = "Maximum number of turns exceded"
             raise RuntimeError(msg)
         self.turn += 1
         return
 
+    def letter_in_yellow(self, letter):
+        for pos in range(5):
+            if letter in self.yellow[pos]:
+                return True
+        return False
+
+    def yellow_letters(self):
+        ylets = set()
+        for x in self.yellow:
+            for l in x:
+                ylets.add(l)
+        return ylet
+
+    def remove_letter_from_yellow(letter):
+        for x in self.yellow:
+            if letter in x:
+                x.remove(letter)
+        return
+
+    def update(self, guess, labels, increment_turn=True):
+        if increment_turn:
+            self.increment_turn()
+        for position, (letter, label) in enumerate(zip(guess, labels)):
+            if label == '0':
+                self.elim.add(letter)
+            elif label == '2':
+                if self.green[position] is not None:
+                    msg = "Expected green letters not to change"
+                    assert letter == self.green[position], msg
+                else:
+                    self.green[position] = letter
+                    self.yellow[position] = set()
+                    for other_pos in range(5):
+                        if other_pos != position and letter in self.yellow[other_pos]:
+                            self.yellow[other_pos].remove(letter)
+            else:
+                self.yellow[position].add(letter)
+        return
+    
     
 def print_guesses(ranked_guesses, offset=0):
     nb_shown = min(MAX_GUESSES_SHOWN, len(ranked_guesses))
@@ -165,7 +212,7 @@ def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
     return.
 
     """
-    guesses, greens_found = generate_guesses(game_state)
+    guesses, green_found = generate_guesses(game_state)
     
     # Rank the guesses
     if crit == "word-freq":
@@ -177,7 +224,7 @@ def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
         # for positions that are not green yet.
         fds = [None for _ in range(5)]
         for pos in range(5):
-            if game_state.green[pos] is None and greens_found[pos] is None:
+            if game_state.green[pos] is None and green_found[pos] is None:
                 fd = {}
                 for guess in guesses:
                     char = guess[pos]
@@ -194,13 +241,52 @@ def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
                     score += fds[pos][char]
             scored_guesses.append((guess, score))
         ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
+    elif crit == "next-guess-freq":
+        # Assume each guess is wrong, and generate next guesses for
+        # each. Compute frequency of next guesses across all current
+        # guesses, assuming they are wrong. Rank guesses by that
+        # relative frequency (descending).
+        next_guess_fd = {}
+
+        # Initialize next game state that will assume the current
+        # guess is all wrong.
+        next_state_global = game_state.copy()
+
+        # For any position in green_found (which is invariant to
+        # any particular guess), add corresponding letter to green at
+        # that position, clear yellow in that position, and
+        # remove the newly green letter from yellow everywhere.
+        for pos in range(5):
+            if green_found[pos] is not None:
+                next_state_global.green[pos] = green_found[pos]
+                next_state_global.yellow[pos] = set()
+                next_state_global.remove_letter_from_yellow(green_found[pos])
+                
+        # Loop over current guesses.
+        for guess in guesses:
+            next_state = next_state_global.copy()
+            
+            # Add chars that are not in green positions, and are not
+            # currently known to be yellow, to elim. 
+            for pos in range(5):
+                letter = guess[pos]
+                if next_state.green[pos] is None and not game_state.letter_in_yellow(letter):
+                    next_state.elim.add(letter)
+                elif game_state.letter_in_yellow(letter):
+                    next_state[yellow].add(letter)
+            next_guesses, _ = generate_guesses(next_state)
+            for g in next_guesses:
+                if g not in next_guess_fd:
+                    next_guess_fd[g] = 0
+                next_guess_fd[g] += 1
+        scored_guesses = [(w,next_guess_fd[w]) if w in next_guess_fd else (w,0) for w in guesses]
+        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
     return ranked_guesses
 
 
 def interact(game_state, crit="word-freq", fd=None):
     if crit == "word-freq":
         assert fd is not None, "fd must be provided if criterion is 'word-freq'"
-    game_state.increment_turn()
 
     # Generate all possible guesses
     ranked_guesses = generate_ranked_guesses(game_state, crit=crit, fd=fd)
@@ -225,28 +311,14 @@ def interact(game_state, crit="word-freq", fd=None):
         print("\nYou guessed correctly. Congrats!\n")
         sys.exit(0)
 
-    # Update game state
-    for position, (letter, label) in enumerate(zip(guess, labels)):
-        if label == '0':
-            game_state.elim.add(letter)
-        elif label == '2':
-            if game_state.green[position] is None:	
-                game_state.green[position] = letter
-                game_state.yellow[position] = set()
-                for other_pos in range(5):
-                    if other_pos != position:
-                        if letter in game_state.yellow[other_pos]:
-                            game_state.yellow[other_pos].remove(letter)
-                        else:
-                            assert letter == game_state.green[position], "Expected green letters not to change"
-        else:
-            game_state.yellow[position].add(letter)
+    # Update game state and return
+    game_state.update(guess, labels, increment_turn=True)
     return game_state                               
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--crit", choices = ["word-freq", "char-freq"], default="word-freq")
+    p.add_argument("--crit", choices = ["word-freq", "char-freq", "next-guess-freq"], default="word-freq")
     args = p.parse_args()
     
     # Get word list
