@@ -5,8 +5,39 @@ from copy import copy, deepcopy
 from itertools import product
 from string import ascii_lowercase
 
+# If the number of zero-frequency guesses <= this threshold, we will
+# show the zero-frequency guesses along with those that have non-zero
+# frequency
+MAX_ZERO_FREQ_GUESSES = 20
+
+# If the number of guesses with non-zero frequency <= this threshold,
+# we will also show the zero-frequency guesses
+MIN_POS_FREQ_GUESSES = 10 
+
+NUM_TO_ORDSTR = {1:'first', 
+		 2:'second',
+		 3:'third',
+		 4:'fourth',
+		 5:'fifth',
+		 6:'sixth'}
+
+
+class GameState:
+    def __init__(self):
+        self.turn = 0
+        self.elim = set() # eliminated letters
+        self.green = [None for _ in range(5)] # green letters in position
+        self.yellow = [set() for _ in range(5)]	# sets of yellow letters in position
+        return
+
+    def increment_turn(self):
+        if self.turn == 6:
+            msg = "Maximum number of turns reached"
+            raise RuntimeError(msg)
+        self.turn += 1
+        return
+
 def print_guesses(ranked_guesses):
-    # Present all possible guesses
     for i in range(len(ranked_guesses)):
         x = ranked_guesses[i]
         if len(x) == 2:
@@ -18,17 +49,49 @@ def print_guesses(ranked_guesses):
     return
 
 
-def generate_guesses(elim, green, yellow):
-    """ Identify all possible guesses based on: set of eliminated letters,
-    list of green letters in position, and list of sets of yellow
-    letters in position. """
+def present_guesses(ranked_guesses, crit="freq"):
+    assert crit in ["freq"], f"Unknown criterion '{crit}'"
+    if args.crit == "freq":
+        # Filter out zero-frequency guesses if there are any guesses
+        # with positive frequency
+        pos_freq = []
+        zero_freq = []
+        for w,f in ranked_guesses:
+            if f > 0:
+                pos_freq.append((w, f))
+            else:
+                zero_freq.append((w, f))
+        if len(pos_freq):
+            print_guesses(pos_freq)
+            if len(zero_freq):
+                if len(zero_freq) <= MAX_ZERO_FREQ_GUESSES or len(pos_freq) <= MIN_POS_FREQ_GUESSES:
+                    line = "-" * (7+len(str(len(pos_freq))))
+                    print(line)
+                    zero_freq = sorted(zero_freq, key=lambda x:x[0], reverse=False)
+                    print_guesses(zero_freq)
+                else:
+                    print(f"... plus {len(zero_freq)} guesses removed because their frequency is 0.")
+            else:
+                zero_freq = sorted(zero_freq, key=lambda x:x[0], reverse=False)
+                print_guesses(zero_freq)
+    return
+
+
+def generate_ranked_guesses(game_state, crit="freq", fd=None):
+    """Identify all possible guesses based on game state, rank, and
+    return.
+
+    """
+    assert crit in ["freq"], f"Unknown criterion '{crit}'"
+    if crit == "freq":
+        assert fd is not None, "fd must be provided if criterion is 'freq'"
 
     # List green positions
-    green_pos = [i for i in range(5) if green[i] is not None]
+    green_pos = [i for i in range(5) if game_state.green[i] is not None]
 
     # Map yellow letters to positions that are open for them
     ylet_to_open = {}
-    for pos, ylet_set in enumerate(yellow):
+    for pos, ylet_set in enumerate(game_state.yellow):
         if len(ylet_set):
             for ylet in ylet_set:
                 if ylet not in ylet_to_open:
@@ -44,14 +107,15 @@ def generate_guesses(elim, green, yellow):
         openset = ylet_to_open[ylet]
         if len(openset) == 1:
             only_pos = list(openset)[0]
-            if green[only_pos] is not None:
+            if game_state.green[only_pos] is not None:
                 msg = f"No open positions left for letter '{ylet}'"
                 raise RuntimeError(msg)
-            green[only_pos] = ylet
+            game_state.green[only_pos] = ylet
             del ylet_to_open[ylet]
 
-    # Generate all templates using yellow letters that have more than one open position left
-    green_template = ['_' if x is None else x for x in green]
+    # Generate all templates using yellow letters that have more than
+    # one open position left
+    green_template = ['_' if x is None else x for x in game_state.green]
     if not len(ylet_to_open):
         templates = [green_template]
     else:
@@ -65,14 +129,14 @@ def generate_guesses(elim, green, yellow):
             for ylet, pos in zip(sorted_ylets, poslist):
                 template[pos] = ylet
             templates.append(template)
-    
+
     # Make regex patterns
-    nonelim = set(ascii_lowercase).difference(elim)
+    nonelim = set(ascii_lowercase).difference(game_state.elim)
     patterns = []
     for i in range(len(templates)):
         for pos in range(5):
             if templates[i][pos] == '_':
-                chars = nonelim.difference(yellow[pos])
+                chars = nonelim.difference(game_state.yellow[pos])
                 char_class = f"[{''.join(sorted(chars))}]"
                 templates[i][pos] = char_class
     for template in templates:
@@ -86,22 +150,62 @@ def generate_guesses(elim, green, yellow):
             if p.match(word):
                 guesses.append(word)
                 break
-    return guesses
-                               
+
+    # Rank the guesses
+    if crit == "freq":
+        guesses = [(w,fd[w]) for w in guesses]
+        ranked_guesses = sorted(guesses, key=lambda x:x[1], reverse=True)
+    return ranked_guesses
+
+
+def interact(game_state):
+    game_state.increment_turn()
+
+    # Generate all possible guesses
+    ranked_guesses = generate_ranked_guesses(game_state, crit=args.crit, fd=fd)
+    if not len(ranked_guesses):
+        msg = "Error: no guesses found"
+        raise RuntimeError(msg)
+
+    # Present ranked guesses to user
+    present_guesses(ranked_guesses, crit=args.crit)
+
+    # Ask for guess
+    turn_ordstr = NUM_TO_ORDSTR[game_state.turn]
+    ans = input(f"\nEnter letters of your {turn_ordstr} guess: ").strip().lower()
+    assert ans.isalpha() and len(ans) == 5, "Expected 5 letters"
+    guess = list(ans)
+    ans = input(f"Enter colours returned for your {turn_ordstr} guess ('{ans}'): ").strip()
+    assert len(ans) == 5, "Expected 5 digits between 0-2"
+    labels = list(ans)
+    for label in labels:
+        assert label in ['0', '1', '2'], "Expected 5 digits between 0-2"
+    if all(x=='2' for x in labels):
+        print("\nYou guessed correctly. Congrats!\n")
+        sys.exit(0)
+
+    # Update game state
+    for position, (letter, label) in enumerate(zip(guess, labels)):
+        if label == '0':
+            game_state.elim.add(letter)
+        elif label == '2':
+            if game_state.green[position] is None:	
+                game_state.green[position] = letter
+                game_state.yellow[position] = set()
+                for position in range(5):
+                    if letter in game_state.yellow[position]:
+                        game_state.yellow[position].remove(letter)
+                    else:
+                        assert letter == game_state.green[position], "Expected green letters not to change"
+            else:
+                game_state.yellow[position].add(letter)
+    return game_state                               
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--crit", choices = ["freq"], default="freq")
     args = p.parse_args()
-
-    # If the number of zero-frequency guesses <= this threshold, we
-    # will show the zero-frequency guesses along with those that have
-    # non-zero frequency
-    MAX_HAPAX_GUESSES = 20
-    
-    # If the number of guesses with non-zero frequency <= this
-    # threshold, we will also show the zero-frequency guesses
-    MIN_FREQ_GUESSES = 10 
     
     # Get word list
     print("\nGetting word list")
@@ -134,83 +238,9 @@ if __name__ == "__main__":
                     fd[word] = rel_freq
                     words_found += 1
         print(f"{words_found}/{len(words)} words found in frequency list")
-        
-    elim = set() # Set of eliminated letters
-    green = [None] * 5 # List of green letters in position
-    yellow = [set() for _ in range(5)] # List of sets of yellow letters in position
-    guess_num = 0
-    num_to_ordstr = {1:'first', 
-                     2:'second',
-                     3:'third',
-                     4:'fourth',
-                     5:'fifth',
-                     6:'sixth'}
-    for guess_num in range(1,7):
-        # Ask for guess
-        ans = input(f"\nEnter letters of your {num_to_ordstr[guess_num]} guess: ").strip().lower()
-        assert ans.isalpha() and len(ans) == 5, "Expected 5 letters"
-        guess = list(ans)
-        ans = input(f"Enter colours returned for your {num_to_ordstr[guess_num]} guess ('{ans}'): ").strip()
-        assert len(ans) == 5, "Expected 5 digits between 0-2"
-        for char in ans:
-            assert char in ['0', '1', '2'], "Expected 5 digits between 0-2"
-        labels = [int(x) for x in ans]
+    
+    # Interact with user
+    game_state = GameState()
+    for turn in range(6):
+        game_state = interact(game_state)
 
-	# Update data on previous guesses
-        for position, (letter, label) in enumerate(zip(guess, labels)):
-            
-            # Update set of eliminated letters
-            if label == 0:
-                elim.add(letter)
-
-            # Update list of green letters
-            elif label == 2:
-                if green[position] is None:
-                    green[position] = letter
-                    yellow[position] = set()
-                    for position in range(5):
-                        if letter in yellow[position]:
-                            yellow[position].remove(letter)
-                else:
-                    assert letter == green[position], "Expected green letters not to change"
-
-            # Udpate lists of yellow letters
-            elif label == 1:
-                yellow[position].add(letter)
-
-        if all(x is not None for x in green):
-            msg = "\nYou guessed correctly. Congrats!\n"
-            print(msg)
-            sys.exit(0)
-            
-	# Generate all possible guesses
-        guesses = generate_guesses(elim, green, yellow)
-        if not len(guesses):
-            msg = "Error: no guesses found"
-            raise RuntimeError(msg)
-        
-	# Rank the guesses
-        if args.crit == "freq":
-            # Filter out zero-frequency guesses if there are any
-            # guesses with positive frequency
-            pos_freq = []
-            hapax = []
-            for w in guesses:
-                if fd[w] > 0:
-                    pos_freq.append((w, fd[w]))
-                else:
-                    hapax.append((w, 0))
-            if len(pos_freq):
-                ranked_guesses = sorted(pos_freq, key=lambda x:x[1], reverse=True)
-                print_guesses(ranked_guesses)
-                if len(hapax):
-                    if len(hapax) <= MAX_HAPAX_GUESSES or len(pos_freq) <= MIN_FREQ_GUESSES:
-                        line = "-" * (7+len(str(len(pos_freq))))
-                        print(line)
-                        ranked_guesses = sorted(hapax, key=lambda x:x[0], reverse=False)
-                        print_guesses(ranked_guesses)
-                    else:
-                        print(f"... plus {len(hapax)} guesses removed because their frequency is 0.")
-            else:
-                ranked_guesses = sorted(hapax, key=lambda x:x[0], reverse=False)
-                print_guesses(ranked_guesses)
