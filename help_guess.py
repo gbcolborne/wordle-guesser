@@ -50,9 +50,8 @@ def print_guesses(ranked_guesses, offset=0):
     return
 
 
-def present_guesses(ranked_guesses, crit="freq"):
-    assert crit in ["freq"], f"Unknown criterion '{crit}'"
-    if args.crit == "freq":
+def present_guesses(ranked_guesses, crit="word-freq"):
+    if args.crit == "word-freq":
         # Filter out zero-frequency guesses if there are any guesses
         # with positive frequency
         pos_freq = []
@@ -153,18 +152,17 @@ def generate_guesses(game_state):
     return guesses, green_found
 
 
-def generate_ranked_guesses(game_state, crit="freq", fd=None):
+def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
     """Identify all possible guesses based on game state, rank, and
     return.
 
     """
-    assert crit in ["freq"], f"Unknown criterion '{crit}'"
-    if crit == "freq":
-        assert fd is not None, "fd must be provided if criterion is 'freq'"
+    if crit == "word-freq":
+        assert fd is not None, "fd must be provided if criterion is 'word-freq'"
     guesses, greens_found = generate_guesses(game_state)
     
     # Rank the guesses
-    if crit == "freq":
+    if crit == "word-freq":
         guesses = [(w,fd[w]) for w in guesses]
         ranked_guesses = sorted(guesses, key=lambda x:x[1], reverse=True)
     return ranked_guesses
@@ -217,7 +215,7 @@ def interact(game_state):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--crit", choices = ["freq"], default="freq")
+    p.add_argument("--crit", choices = ["word-freq"], default="word-freq")
     args = p.parse_args()
     
     # Get word list
@@ -228,7 +226,7 @@ if __name__ == "__main__":
     print(f"Nb words: {len(words)}")        
     
     # Get other resources if required
-    if args.crit == "freq":
+    if args.crit == "word-freq":
         print("\nGetting word frequency list")
         r = requests.get("http://corpus.leeds.ac.uk/frqc/internet-en.num",
                          allow_redirects=True)
