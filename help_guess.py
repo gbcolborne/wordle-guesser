@@ -23,7 +23,7 @@ NUM_TO_ORDSTR = {1:'first',
 
 class GameState:
     def __init__(self):
-        self.turn = 0
+        self.turn = 0 # Turn
         self.elim = set() # eliminated letters
         self.green = [None for _ in range(5)] # green letters in position
         self.yellow = [set() for _ in range(5)]	# sets of yellow letters in position
@@ -51,7 +51,7 @@ def print_guesses(ranked_guesses, offset=0):
 
 
 def present_guesses(ranked_guesses, crit="word-freq"):
-    if args.crit == "word-freq":
+    if crit == "word-freq":
         # Filter out zero-frequency guesses if there are any guesses
         # with positive frequency
         pos_freq = []
@@ -168,17 +168,17 @@ def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
     return ranked_guesses
 
 
-def interact(game_state):
+def interact(game_state, crit="word-freq"):
     game_state.increment_turn()
 
     # Generate all possible guesses
-    ranked_guesses = generate_ranked_guesses(game_state, crit=args.crit, fd=fd)
+    ranked_guesses = generate_ranked_guesses(game_state, crit=crit, fd=fd)
     if not len(ranked_guesses):
         msg = "Error: no guesses found"
         raise RuntimeError(msg)
 
     # Present ranked guesses to user
-    present_guesses(ranked_guesses, crit=args.crit)
+    present_guesses(ranked_guesses, crit=crit)
 
     # Ask for guess
     turn_ordstr = NUM_TO_ORDSTR[game_state.turn]
@@ -215,7 +215,7 @@ def interact(game_state):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--crit", choices = ["word-freq"], default="word-freq")
+    p.add_argument("--crit", choices = ["word-freq", "char-freq"], default="word-freq")
     args = p.parse_args()
     
     # Get word list
@@ -253,5 +253,5 @@ if __name__ == "__main__":
     # Interact with user
     game_state = GameState()
     for turn in range(6):
-        game_state = interact(game_state)
+        game_state = interact(game_state, crit=args.crit)
 
