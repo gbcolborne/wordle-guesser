@@ -73,7 +73,8 @@ class GameState:
                     assert letter == self.green[position], err_msg
                 else:
                     self.green[position] = letter
-                    del self.yellow[letter]
+                    if letter in self.yellow:
+                        del self.yellow[letter]
                     
     def get_tried_yellows_for_position(self, position):
         assert position in range(5)
