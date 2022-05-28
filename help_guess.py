@@ -5,6 +5,9 @@ from copy import copy, deepcopy
 from itertools import product
 from string import ascii_lowercase
 
+# Max guesses shown
+MAX_GUESSES_SHOWN = 100
+
 # If the number of zero-frequency guesses <= this threshold, we will
 # show the zero-frequency guesses along with those that have non-zero
 # frequency
@@ -38,7 +41,8 @@ class GameState:
 
     
 def print_guesses(ranked_guesses, offset=0):
-    for i in range(len(ranked_guesses)):
+    nb_shown = min(MAX_GUESSES_SHOWN, len(ranked_guesses))
+    for i in range(nb_shown):
         guess_num = i + offset + 1
         x = ranked_guesses[i]
         if len(x) == 2:
@@ -47,6 +51,8 @@ def print_guesses(ranked_guesses, offset=0):
         else:
             msg = f"Expected (guess, score), but found this: '{x}'"
             raise RuntimeError(msg)
+    if len(ranked_guesses) > nb_shown:
+        print(f"... plus {len(ranked_guesses)-nb_shown} lower-ranked guesses")
     return
 
 
@@ -74,6 +80,8 @@ def present_guesses(ranked_guesses, crit="word-freq"):
             else:
                 zero_freq = sorted(zero_freq, key=lambda x:x[0], reverse=False)
                 print_guesses(zero_freq)
+    else:
+        print_guesses(ranked_guesses)        
     return
 
 
@@ -157,18 +165,41 @@ def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
     return.
 
     """
-    if crit == "word-freq":
-        assert fd is not None, "fd must be provided if criterion is 'word-freq'"
     guesses, greens_found = generate_guesses(game_state)
     
     # Rank the guesses
     if crit == "word-freq":
-        guesses = [(w,fd[w]) for w in guesses]
-        ranked_guesses = sorted(guesses, key=lambda x:x[1], reverse=True)
+        scored_guesses = [(w,fd[w]) for w in guesses]
+        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
+    elif crit == "char-freq":
+        # Compute position-wise rel freq of chars in positions that
+        # are not green yet. Score guesses by summing these rel freqs
+        # for positions that are not green yet.
+        fds = [None for _ in range(5)]
+        for pos in range(5):
+            if game_state.green[pos] is None and greens_found[pos] is None:
+                fd = {}
+                for guess in guesses:
+                    char = guess[pos]
+                    if char not in fd:
+                        fd[char] = 0
+                    fd[char] += 1/len(guesses)
+                fds[pos] = fd
+        scored_guesses = []
+        for guess in guesses:
+            score = 0
+            for pos in range(5):
+                if fds[pos] is not None:
+                    char = guess[pos]
+                    score += fds[pos][char]
+            scored_guesses.append((guess, score))
+        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
     return ranked_guesses
 
 
-def interact(game_state, crit="word-freq"):
+def interact(game_state, crit="word-freq", fd=None):
+    if crit == "word-freq":
+        assert fd is not None, "fd must be provided if criterion is 'word-freq'"
     game_state.increment_turn()
 
     # Generate all possible guesses
@@ -226,6 +257,7 @@ if __name__ == "__main__":
     print(f"Nb words: {len(words)}")        
     
     # Get other resources if required
+    fd = None
     if args.crit == "word-freq":
         print("\nGetting word frequency list")
         r = requests.get("http://corpus.leeds.ac.uk/frqc/internet-en.num",
@@ -253,5 +285,5 @@ if __name__ == "__main__":
     # Interact with user
     game_state = GameState()
     for turn in range(6):
-        game_state = interact(game_state, crit=args.crit)
+        game_state = interact(game_state, crit=args.crit, fd=fd)
 
