@@ -1,6 +1,7 @@
 """ Generate and rank guesses to help solve a Wordle puzzle. """
 
 import sys, argparse, requests, re
+from collections import defaultdict
 from copy import copy, deepcopy
 from itertools import product
 from string import ascii_lowercase
@@ -45,22 +46,39 @@ class GameState:
     def update(self, guess, labels, increment_turn=True):
         if increment_turn:
             self.increment_turn()
+        green_here = defaultdict(list)
+        yellow_here = defaultdict(list)
+        grey_here = defaultdict(list)
         for position, (letter, label) in enumerate(zip(guess, labels)):
             if label == '0':
-                self.elim.add(letter)
+                grey_here[letter].append(position)
             elif label == '1':
-                if letter not in self.yellow:
-                    self.yellow[letter] = set()
-                self.yellow[letter].add(position)
+                yellow_here[letter].append(position)
             elif label == '2':
+                green_here[letter].append(position)
+        for letter, positions in grey_here.items():
+            self.elim.add(letter)
+        for letter, positions in yellow_here.items():
+            if letter not in self.yellow:
+                self.yellow[letter] = set()
+            for position in positions:
+                self.yellow[letter].add(position)        
+        for letter, positions in green_here.items():
+            for position in positions:
                 if self.green[position] is not None:
-                    err_msg = "Expected green letters not to change"
-                    assert letter == self.green[position], err_msg
+                    if letter != self.green[position]:
+                        msg = "Expected green letters not to change"
+                        raise RuntimeError(msg)
                 else:
                     self.green[position] = letter
                     if letter in self.yellow:
-                        del self.yellow[letter]
-                    
+                        if letter in yellow_here:
+                            if position in self.yellow[letter]:
+                                self.yellow[letter].remove(position)
+                        else:
+                            del self.yellow[letter]
+        return
+    
     def get_tried_yellows_for_position(self, position):
         assert position in range(5)
         yellows = set()
