@@ -7,22 +7,12 @@ from string import ascii_lowercase
 
 # Max guesses shown
 MAX_GUESSES_SHOWN = 100
-
-# If the number of zero-frequency guesses <= this threshold, we will
-# show the zero-frequency guesses along with those that have non-zero
-# frequency
-MAX_ZERO_FREQ_GUESSES = 20
-
-# If the number of guesses with non-zero frequency <= this threshold,
-# we will also show the zero-frequency guesses
-MIN_POS_FREQ_GUESSES = 10 
-
-NUM_TO_ORDSTR = {1:'first', 
-		 2:'second',
-		 3:'third',
-		 4:'fourth',
-		 5:'fifth',
-		 6:'sixth'}
+NUM_TO_ORDSTR = {1:'first',
+                 2:'second',
+                 3:'third',
+                 4:'fourth',
+                 5:'fifth',
+                 6:'sixth'}
 
 class GameState:
     def __init__(self):
@@ -150,68 +140,44 @@ class GameState:
                     break
         return guesses, green_found
 
-    def generate_ranked_guesses(self, crit="word-freq", fd=None):
+    def generate_ranked_guesses(self, wordfreq, Lambda):
         """Identify all possible guesses based on game state, rank, and
         return.
 
         """
         guesses, green_found = self.generate_guesses()
         
-        # Rank the guesses
-        if crit == "word-freq":
-            scored_guesses = [(w,fd[w]) for w in guesses]
-            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
-        elif crit == "char-freq":
-            # Compute position-wise rel freq of chars in positions
-            # that are not green yet. Score guesses by summing these
-            # rel freqs for positions that are not green yet.
-            fds = [None for _ in range(5)]
-            for pos in range(5):
-                if self.green[pos] is None and green_found[pos] is None:
-                    fd = {}
-                    for guess in guesses:
-                        char = guess[pos]
-                        if char not in fd:
-                            fd[char] = 0
-                        fd[char] += 1/len(guesses)
-                    fds[pos] = fd
-            scored_guesses = []
-            for guess in guesses:
-                score = 0
-                for pos in range(5):
-                    if fds[pos] is not None:
-                        char = guess[pos]
-                        score += fds[pos][char]
-                scored_guesses.append((guess, score))
-            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
-        elif crit == "space-redux":
-            # Assume each guess is wrong, and generate next guesses
-            # for each. Score is reduction of search space.
-            labels = ['0' for _ in range(5)]
-            for pos in range(5):
-                if self.green[pos] is not None or green_found[pos] is not None:
-                    labels[pos] == '2'
-            scored_guesses = []
-            for gix, g in enumerate(guesses):
-                next_state = self.copy()
-                next_state.update(g, labels)
-                next_guesses, _ = next_state.generate_guesses()
-                score = (len(guesses) - len(next_guesses)) / len(guesses)
-                scored_guesses.append((g, score))
-                if (gix+1) % 100 == 0:
-                    print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
-            print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
-            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
-        return ranked_guesses
+        # Assume each guess is wrong, and generate next guesses
+        # for each. Compute reduction of search space.
+        labels = ['0' for _ in range(5)]
+        for pos in range(5):
+            if self.green[pos] is not None or green_found[pos] is not None:
+                labels[pos] == '2'
+        space_redux = {}
+        for gix, g in enumerate(guesses):
+            next_state = self.copy()
+            next_state.update(g, labels)
+            next_guesses, _ = next_state.generate_guesses()
+            # Initial score is reduction of search space assuming guess is wrong 
+            space_redux[g] = (len(guesses) - len(next_guesses)) / len(guesses)
+            if (gix+1) % 100 == 0:
+                print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
+        scored_guesses = []
+        for g in guesses:
+            score = Lambda * space_redux[g] + ((1 - Lambda) * wordfreq[g])
+            scored_guesses.append((g, score))
+        print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
+        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
+        return ranked_guesses, space_redux
 
-def print_guesses(ranked_guesses, offset=0):
+def present_guesses(ranked_guesses, wordfreq, space_redux):
     nb_shown = min(MAX_GUESSES_SHOWN, len(ranked_guesses))
     for i in range(nb_shown):
-        guess_num = i + offset + 1
+        guess_num = i + 1
         x = ranked_guesses[i]
         if len(x) == 2:
             guess, score = x
-            print(f"{guess_num}\t{guess}\t{score}")
+            print(f"{guess_num}\t{guess}\t{score:.4f} (space-redux={space_redux[guess]:.4f}, freq={wordfreq[guess]:.4f})")
         else:
             msg = f"Expected (guess, score), but found this: '{x}'"
             raise RuntimeError(msg)
@@ -219,47 +185,16 @@ def print_guesses(ranked_guesses, offset=0):
         print(f"... plus {len(ranked_guesses)-nb_shown} lower-ranked guesses")
     return
 
-def present_guesses(ranked_guesses, crit="word-freq"):
-    if crit == "word-freq":
-        # Filter out zero-frequency guesses if there are any guesses
-        # with positive frequency
-        pos_freq = []
-        zero_freq = []
-        for w,f in ranked_guesses:
-            if f > 0:
-                pos_freq.append((w, f))
-            else:
-                zero_freq.append((w, f))
-        if len(pos_freq):
-            print_guesses(pos_freq)
-            if len(zero_freq):
-                if len(zero_freq) <= MAX_ZERO_FREQ_GUESSES or len(pos_freq) <= MIN_POS_FREQ_GUESSES:
-                    line = "-" * (7+len(str(len(pos_freq))))
-                    print(line)
-                    zero_freq = sorted(zero_freq, key=lambda x:x[0], reverse=False)
-                    print_guesses(zero_freq, offset=len(pos_freq))
-                else:
-                    print(f"... plus {len(zero_freq)} guesses removed because their frequency is 0.")
-            else:
-                zero_freq = sorted(zero_freq, key=lambda x:x[0], reverse=False)
-                print_guesses(zero_freq)
-    else:
-        print_guesses(ranked_guesses)        
-    return
 
-
-def interact(game_state, crit="word-freq", fd=None):
-    if crit == "word-freq":
-        assert fd is not None, "fd must be provided if criterion is 'word-freq'"
-
+def interact(game_state, wordfreq, Lambda):
     # Generate all possible guesses
-    ranked_guesses = game_state.generate_ranked_guesses(crit=crit, fd=fd)
+    ranked_guesses, space_redux = game_state.generate_ranked_guesses(wordfreq, Lambda)
     if not len(ranked_guesses):
         msg = "Error: no guesses found"
         raise RuntimeError(msg)
 
     # Present ranked guesses to user
-    present_guesses(ranked_guesses, crit=crit)
+    present_guesses(ranked_guesses, wordfreq, space_redux)
 
     # Ask for guess
     turn_ordstr = NUM_TO_ORDSTR[game_state.turn]
@@ -281,8 +216,12 @@ def interact(game_state, crit="word-freq", fd=None):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--crit", choices = ["word-freq", "char-freq", "space-redux"], default="word-freq")
+    p.add_argument("--Lambda",
+                   type=float,
+                   default=0.5,
+                   help="coefficient of scoring function (> 0.5 will weight space-redux more heavily)")
     args = p.parse_args()
+    assert args.Lambda >= 0 and args.Lambda <= 1, "lambda must be between 0 and 1"
     
     # Get word list
     print("\nGetting word list")
@@ -291,34 +230,36 @@ if __name__ == "__main__":
     words = set(r.text.split("\n"))
     print(f"Nb words: {len(words)}")        
     
-    # Get other resources if required
-    fd = None
-    if args.crit == "word-freq":
-        print("\nGetting word frequency list")
-        r = requests.get("http://corpus.leeds.ac.uk/frqc/internet-en.num",
-                         allow_redirects=True)
-        lines = r.text.split("\n")
-        # skip header
-        lines = lines[4:]
-        fd = {word:0 for word in words}
-        words_found = 0
-        for line in lines:
-            line = line.strip()
-            if len(line):
-                elems = line.split()
-                if not len(elems) == 3: 
-                    print(f"WARNING: skipping line in freq list: Expected 3 space-separated strings in each row, got '{line}'")
-                    continue
-                rank, rel_freq, word = elems
-                rank = int(rank)
-                rel_freq = float(rel_freq)
-                if word in words:
-                    fd[word] = rel_freq
-                    words_found += 1
-        print(f"{words_found}/{len(words)} words found in frequency list")
-    
+    # Get word frequency list
+    print("\nGetting word frequency list")
+    r = requests.get("http://corpus.leeds.ac.uk/frqc/internet-en.num",
+                     allow_redirects=True)
+    lines = r.text.split("\n")
+    # skip header
+    lines = lines[4:]
+    word2freq = {word:0 for word in words}
+    words_found = 0
+    for line in lines:
+        line = line.strip()
+        if len(line):
+            elems = line.split()
+            if not len(elems) == 3: 
+                print(f"WARNING: skipping line in freq list: Expected 3 space-separated strings in each row, got '{line}'")
+                continue
+            rank, freq, word = elems
+            rank = int(rank)
+            freq = float(freq)
+            if word in words:
+                word2freq[word] = freq
+                words_found += 1
+    print(f"{words_found}/{len(words)} words found in frequency list")
+
+    # Normalize
+    max_freq = max(word2freq.values())
+    norm_word2freq = {w:f/max_freq for (w,f) in word2freq.items()} 
+        
     # Interact with user
     game_state = GameState()
     for turn in range(6):
-        game_state = interact(game_state, crit=args.crit, fd=fd)
+        game_state = interact(game_state, norm_word2freq, args.Lambda)
 
