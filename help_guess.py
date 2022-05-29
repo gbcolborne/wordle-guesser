@@ -79,7 +79,136 @@ class GameState:
                 yellows.add(letter)
         return yellows
 
+    def generate_guesses(self):
+        """Identify all possible guesses based on game state."""
     
+        # List green positions
+        green_pos = [i for i in range(5) if self.green[i] is not None]
+    
+        # Map yellow letters to positions that are open for them
+        ylet_to_open = {}
+        for letter, tried in game_state.yellow.items():
+            ylet_to_open[letter] = set(range(5)).difference(tried).difference(green_pos) 
+            if not len(ylet_to_open[letter]):
+                msg = f"No open positions left for letter '{ylet}'"
+                raise RuntimeError(msg)
+    
+        # Check if we have found any new green position,
+        # i.e. positions that are the last valid position for a yellow
+        # letter
+        green_found = [None for _ in range(5)]
+        for ylet in list(ylet_to_open.keys()):
+            openset = ylet_to_open[ylet]
+            if len(openset) == 1:
+                only_pos = list(openset)[0]
+                if self.green[only_pos] is not None:
+                    msg = f"No open positions left for letter '{ylet}'"
+                    raise RuntimeError(msg)
+                green_found[only_pos] = ylet
+                del ylet_to_open[ylet]
+    
+        # Generate all templates using yellow letters that have more
+        # than one open position left
+        green_template = ['_' if x is None else x for x in self.green]
+        for pos, letter in enumerate(green_found):
+            if letter is not None:
+                green_template[pos] = letter
+        if not len(ylet_to_open):
+            templates = [green_template]
+        else:
+            templates = []        
+            sorted_ylets = sorted(ylet_to_open.keys())
+            openlists = [sorted(ylet_to_open[k]) for k in sorted_ylets]
+            crossprod = [list(x) for x in list(product(*openlists))]
+            poslists = [x for x in crossprod if len(x) == len(set(x))]
+            for poslist in poslists:
+                template = copy(green_template)
+                for ylet, pos in zip(sorted_ylets, poslist):
+                    template[pos] = ylet
+                templates.append(template)
+    
+        # Make regex patterns
+        nonelim = set(ascii_lowercase).difference(self.elim)
+        patterns = []
+        for i in range(len(templates)):
+            for pos in range(5):
+                if templates[i][pos] == '_':
+                    tried = self.get_tried_yellows_for_position(pos)                
+                    chars = nonelim.difference(tried)
+                    char_class = f"[{''.join(sorted(chars))}]"
+                    templates[i][pos] = char_class
+        for template in templates:
+            pattern = re.compile(''.join(template))
+            patterns.append(pattern)
+      
+        # Generate guesses
+        guesses = []
+        for word in words:
+            for p in patterns:
+                if p.match(word):
+                    guesses.append(word)
+                    break
+        return guesses, green_found
+
+    def generate_ranked_guesses(self, crit="word-freq", fd=None):
+        """Identify all possible guesses based on game state, rank, and
+        return.
+
+        """
+        guesses, green_found = self.generate_guesses()
+        
+        # Rank the guesses
+        if crit == "word-freq":
+            scored_guesses = [(w,fd[w]) for w in guesses]
+            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
+        elif crit == "char-freq":
+            # Compute position-wise rel freq of chars in positions
+            # that are not green yet. Score guesses by summing these
+            # rel freqs for positions that are not green yet.
+            fds = [None for _ in range(5)]
+            for pos in range(5):
+                if self.green[pos] is None and green_found[pos] is None:
+                    fd = {}
+                    for guess in guesses:
+                        char = guess[pos]
+                        if char not in fd:
+                            fd[char] = 0
+                        fd[char] += 1/len(guesses)
+                    fds[pos] = fd
+            scored_guesses = []
+            for guess in guesses:
+                score = 0
+                for pos in range(5):
+                    if fds[pos] is not None:
+                        char = guess[pos]
+                        score += fds[pos][char]
+                scored_guesses.append((guess, score))
+            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
+        elif crit == "next-guess-freq":
+            # Assume each guess is wrong, and generate next guesses
+            # for each. Compute frequency of next guesses across all
+            # current guesses, assuming they are wrong. Rank guesses
+            # by that relative frequency (descending).
+            next_guess_fd = {}
+            labels = ['0' for _ in range(5)]
+            for pos in range(5):
+                if self.green[pos] is not None or green_found[pos] is not None:
+                    labels[pos] == '2'
+            for gix, g in enumerate(guesses):
+                next_state = self.copy()
+                next_state.update(g, labels)
+                next_guesses, _ = next_state.generate_guesses()
+                for g in next_guesses:
+                    if g not in next_guess_fd:
+                        next_guess_fd[g] = 0
+                    next_guess_fd[g] += 1
+                if (gix+1) % 100 == 0:
+                    print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
+            print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
+            scored_guesses = [(w,next_guess_fd[w]) if w in next_guess_fd else (w,0) for w in guesses]
+            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=False)
+        return ranked_guesses
+
 def print_guesses(ranked_guesses, offset=0):
     nb_shown = min(MAX_GUESSES_SHOWN, len(ranked_guesses))
     for i in range(nb_shown):
@@ -123,141 +252,13 @@ def present_guesses(ranked_guesses, crit="word-freq"):
         print_guesses(ranked_guesses)        
     return
 
-def generate_guesses(game_state):
-    """Identify all possible guesses based on game state."""
-    
-    # List green positions
-    green_pos = [i for i in range(5) if game_state.green[i] is not None]
-    
-    # Map yellow letters to positions that are open for them
-    ylet_to_open = {}
-    for letter, tried in game_state.yellow.items():
-        ylet_to_open[letter] = set(range(5)).difference(tried).difference(green_pos) 
-        if not len(ylet_to_open[letter]):
-            msg = f"No open positions left for letter '{ylet}'"
-            raise RuntimeError(msg)
-    
-    # Check if we have found any new green position, i.e. positions
-    # that are the last valid position for a yellow letter
-    green_found = [None for _ in range(5)]
-    for ylet in list(ylet_to_open.keys()):
-        openset = ylet_to_open[ylet]
-        if len(openset) == 1:
-            only_pos = list(openset)[0]
-            if game_state.green[only_pos] is not None:
-                msg = f"No open positions left for letter '{ylet}'"
-                raise RuntimeError(msg)
-            green_found[only_pos] = ylet
-            del ylet_to_open[ylet]
-    
-    # Generate all templates using yellow letters that have more than
-    # one open position left
-    green_template = ['_' if x is None else x for x in game_state.green]
-    for pos, letter in enumerate(green_found):
-        if letter is not None:
-            green_template[pos] = letter
-    if not len(ylet_to_open):
-        templates = [green_template]
-    else:
-        templates = []        
-        sorted_ylets = sorted(ylet_to_open.keys())
-        openlists = [sorted(ylet_to_open[k]) for k in sorted_ylets]
-        crossprod = [list(x) for x in list(product(*openlists))]
-        poslists = [x for x in crossprod if len(x) == len(set(x))]
-        for poslist in poslists:
-            template = copy(green_template)
-            for ylet, pos in zip(sorted_ylets, poslist):
-                template[pos] = ylet
-            templates.append(template)
-    
-    # Make regex patterns
-    nonelim = set(ascii_lowercase).difference(game_state.elim)
-    patterns = []
-    for i in range(len(templates)):
-        for pos in range(5):
-            if templates[i][pos] == '_':
-                tried = game_state.get_tried_yellows_for_position(pos)                
-                chars = nonelim.difference(tried)
-                char_class = f"[{''.join(sorted(chars))}]"
-                templates[i][pos] = char_class
-    for template in templates:
-        pattern = re.compile(''.join(template))
-        patterns.append(pattern)
-      
-    # Generate guesses
-    guesses = []
-    for word in words:
-        for p in patterns:
-            if p.match(word):
-                guesses.append(word)
-                break
-    return guesses, green_found
-
-def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
-    """Identify all possible guesses based on game state, rank, and
-    return.
-
-    """
-    guesses, green_found = generate_guesses(game_state)
-    
-    # Rank the guesses
-    if crit == "word-freq":
-        scored_guesses = [(w,fd[w]) for w in guesses]
-        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
-    elif crit == "char-freq":
-        # Compute position-wise rel freq of chars in positions that
-        # are not green yet. Score guesses by summing these rel freqs
-        # for positions that are not green yet.
-        fds = [None for _ in range(5)]
-        for pos in range(5):
-            if game_state.green[pos] is None and green_found[pos] is None:
-                fd = {}
-                for guess in guesses:
-                    char = guess[pos]
-                    if char not in fd:
-                        fd[char] = 0
-                    fd[char] += 1/len(guesses)
-                fds[pos] = fd
-        scored_guesses = []
-        for guess in guesses:
-            score = 0
-            for pos in range(5):
-                if fds[pos] is not None:
-                    char = guess[pos]
-                    score += fds[pos][char]
-            scored_guesses.append((guess, score))
-        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
-    elif crit == "next-guess-freq":
-        # Assume each guess is wrong, and generate next guesses for
-        # each. Compute frequency of next guesses across all current
-        # guesses, assuming they are wrong. Rank guesses by that
-        # relative frequency (descending).
-        next_guess_fd = {}
-        labels = ['0' for _ in range(5)]
-        for pos in range(5):
-            if game_state.green[pos] is not None or green_found[pos] is not None:
-                labels[pos] == '2'
-        for gix, g in enumerate(guesses):
-            next_state = game_state.copy()
-            next_state.update(g, labels)
-            next_guesses, _ = generate_guesses(next_state)
-            for g in next_guesses:
-                if g not in next_guess_fd:
-                    next_guess_fd[g] = 0
-                next_guess_fd[g] += 1
-            if (gix+1) % 100 == 0:
-                print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
-        print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
-        scored_guesses = [(w,next_guess_fd[w]) if w in next_guess_fd else (w,0) for w in guesses]
-        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=False)
-    return ranked_guesses
 
 def interact(game_state, crit="word-freq", fd=None):
     if crit == "word-freq":
         assert fd is not None, "fd must be provided if criterion is 'word-freq'"
 
     # Generate all possible guesses
-    ranked_guesses = generate_ranked_guesses(game_state, crit=crit, fd=fd)
+    ranked_guesses = game_state.generate_ranked_guesses(crit=crit, fd=fd)
     if not len(ranked_guesses):
         msg = "Error: no guesses found"
         raise RuntimeError(msg)
