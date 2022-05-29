@@ -33,12 +33,7 @@ class GameState:
         return
 
     def copy(self):
-        new = GameState()
-        new.turn = self.turn
-        new.elim = self.elim
-        new.green = self.green
-        new.yellow = self.yellow
-        return new
+        return deepcopy(self)
 
     def increment_turn(self):
         if self.turn == 6:
@@ -133,7 +128,7 @@ def generate_guesses(game_state):
     
     # List green positions
     green_pos = [i for i in range(5) if game_state.green[i] is not None]
-
+    
     # Map yellow letters to positions that are open for them
     ylet_to_open = {}
     for letter, tried in game_state.yellow.items():
@@ -141,7 +136,7 @@ def generate_guesses(game_state):
         if not len(ylet_to_open[letter]):
             msg = f"No open positions left for letter '{ylet}'"
             raise RuntimeError(msg)
-            
+    
     # Check if we have found any new green position, i.e. positions
     # that are the last valid position for a yellow letter
     green_found = [None for _ in range(5)]
@@ -154,7 +149,7 @@ def generate_guesses(game_state):
                 raise RuntimeError(msg)
             green_found[only_pos] = ylet
             del ylet_to_open[ylet]
-            
+    
     # Generate all templates using yellow letters that have more than
     # one open position left
     green_template = ['_' if x is None else x for x in game_state.green]
@@ -174,7 +169,7 @@ def generate_guesses(game_state):
             for ylet, pos in zip(sorted_ylets, poslist):
                 template[pos] = ylet
             templates.append(template)
-
+    
     # Make regex patterns
     nonelim = set(ascii_lowercase).difference(game_state.elim)
     patterns = []
@@ -185,7 +180,6 @@ def generate_guesses(game_state):
                 chars = nonelim.difference(tried)
                 char_class = f"[{''.join(sorted(chars))}]"
                 templates[i][pos] = char_class
-
     for template in templates:
         pattern = re.compile(''.join(template))
         patterns.append(pattern)
@@ -239,40 +233,23 @@ def generate_ranked_guesses(game_state, crit="word-freq", fd=None):
         # guesses, assuming they are wrong. Rank guesses by that
         # relative frequency (descending).
         next_guess_fd = {}
-
-        # Initialize next game state that will assume the current
-        # guess is all wrong.
-        next_state_global = game_state.copy()
-
-        # For any position in green_found (which is invariant to
-        # any particular guess), add corresponding letter to green at
-        # that position, clear yellow in that position, and
-        # remove the newly green letter from yellow everywhere.
+        labels = ['0' for _ in range(5)]
         for pos in range(5):
-            if green_found[pos] is not None:
-                next_state_global.green[pos] = green_found[pos]
-                next_state_global.yellow[pos] = set()
-                next_state_global.remove_letter_from_yellow(green_found[pos])
-                
-        # Loop over current guesses.
-        for guess in guesses:
-            next_state = next_state_global.copy()
-            
-            # Add chars that are not in green positions, and are not
-            # currently known to be yellow, to elim. 
-            for pos in range(5):
-                letter = guess[pos]
-                if next_state.green[pos] is None and not game_state.letter_in_yellow(letter):
-                    next_state.elim.add(letter)
-                elif game_state.letter_in_yellow(letter):
-                    next_state[yellow].add(letter)
+            if game_state.green[pos] is not None or green_found[pos] is not None:
+                labels[pos] == '2'
+        for gix, g in enumerate(guesses):
+            next_state = game_state.copy()
+            next_state.update(g, labels)
             next_guesses, _ = generate_guesses(next_state)
             for g in next_guesses:
                 if g not in next_guess_fd:
                     next_guess_fd[g] = 0
                 next_guess_fd[g] += 1
+            if (gix+1) % 100 == 0:
+                print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
+        print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
         scored_guesses = [(w,next_guess_fd[w]) if w in next_guess_fd else (w,0) for w in guesses]
-        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
+        ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=False)
     return ranked_guesses
 
 def interact(game_state, crit="word-freq", fd=None):
