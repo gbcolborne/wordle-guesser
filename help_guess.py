@@ -184,29 +184,24 @@ class GameState:
                         score += fds[pos][char]
                 scored_guesses.append((guess, score))
             ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
-        elif crit == "next-guess-freq":
+        elif crit == "space-redux":
             # Assume each guess is wrong, and generate next guesses
-            # for each. Compute frequency of next guesses across all
-            # current guesses, assuming they are wrong. Rank guesses
-            # by that relative frequency (descending).
-            next_guess_fd = {}
+            # for each. Score is reduction of search space.
             labels = ['0' for _ in range(5)]
             for pos in range(5):
                 if self.green[pos] is not None or green_found[pos] is not None:
                     labels[pos] == '2'
+            scored_guesses = []
             for gix, g in enumerate(guesses):
                 next_state = self.copy()
                 next_state.update(g, labels)
                 next_guesses, _ = next_state.generate_guesses()
-                for g in next_guesses:
-                    if g not in next_guess_fd:
-                        next_guess_fd[g] = 0
-                    next_guess_fd[g] += 1
+                score = (len(guesses) - len(next_guesses)) / len(guesses)
+                scored_guesses.append((g, score))
                 if (gix+1) % 100 == 0:
                     print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
             print(f"Nb guesses scored: {gix+1}/{len(guesses)}")
-            scored_guesses = [(w,next_guess_fd[w]) if w in next_guess_fd else (w,0) for w in guesses]
-            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=False)
+            ranked_guesses = sorted(scored_guesses, key=lambda x:x[1], reverse=True)
         return ranked_guesses
 
 def print_guesses(ranked_guesses, offset=0):
@@ -286,7 +281,7 @@ def interact(game_state, crit="word-freq", fd=None):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
-    p.add_argument("--crit", choices = ["word-freq", "char-freq", "next-guess-freq"], default="word-freq")
+    p.add_argument("--crit", choices = ["word-freq", "char-freq", "space-redux"], default="word-freq")
     args = p.parse_args()
     
     # Get word list
